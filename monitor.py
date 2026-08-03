@@ -58,6 +58,12 @@ while True:
         print(f"  {'Ep':>3s}  {'box':>7s}  {'cls':>7s}  {'dfl':>7s}  {'P':>6s}  {'R':>6s}  {'mAP50':>7s}  {'mAP95':>7s}  {'v_box':>7s}   {'趋势':>5s}")
         print("  " + "-" * 96)
 
+        # 去重: 每轮只保留最后一次记录
+        seen = {}
+        for d in lines:
+            seen[int(d[0])] = d
+        lines = [seen[k] for k in sorted(seen.keys())]
+
         maps = []; boxes_list = []; vboxes = []
         for i, d in enumerate(lines):
             e      = int(d[0])

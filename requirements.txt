@@ -1,3 +1,5 @@
-gdown
-numpy
-opencv-python
+# 核心功能只用标准库，无需安装任何东西。
+# 下面两个是可选的，装了才显示对应信息。
+
+psutil>=5.9        # 内存占用百分比；不装则显示 N/A
+# nvidia-smi 来自显卡驱动（随 CUDA 一起装），不是 pip 包，用来显示 GPU 利用率与显存

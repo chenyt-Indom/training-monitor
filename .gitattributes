@@ -1,0 +1,4 @@
+# 统一用 LF，避免 Windows 上提交时被转成 CRLF 导致跨平台 diff 噪声
+* text=auto eol=lf
+*.png binary
+*.jpg binary

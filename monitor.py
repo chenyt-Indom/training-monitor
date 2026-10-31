@@ -187,6 +187,9 @@ def live_progress(run_dir: str) -> dict | None:
     ultralytics 要等每轮验证跑完才写 results.csv，首轮结束前监控只能显示
     「启动中」，干等半小时看不到任何数字。日志里有进度条，可以提前显示。
     日志通常被重定向到训练目录的同级目录。
+
+    返回里的 age 是日志距今多少秒 —— 训练挂掉后日志就不再更新，
+    调用方靠它区分「还在跑」和「已经停了」。
     """
     parent = os.path.dirname(os.path.abspath(run_dir).rstrip("\\/"))
     logs = glob.glob(os.path.join(parent, "*.log"))
@@ -199,7 +202,8 @@ def live_progress(run_dir: str) -> dict | None:
     ep, n_ep, step, n_step, its, eta = hits[-1]
     return {"ep": int(ep), "n_ep": int(n_ep), "step": int(step),
             "n_step": int(n_step), "its": float(its), "eta": eta or "?",
-            "log": os.path.basename(log)}
+            "log": os.path.basename(log),
+            "age": max(0.0, time.time() - os.path.getmtime(log))}
 
 
 # ────────────────────────────────────────────────────────────
@@ -287,7 +291,7 @@ def render_header(cfg: dict, title: str, elapsed_min: float, width: int = 94) ->
 
 
 def render(cfg: dict, rows: list[list[str]], n_total: int, title: str,
-           elapsed_min: float, width: int = 94) -> None:
+           elapsed_min: float, width: int = 94, run_dir: str | None = None) -> None:
     render_header(cfg, title, elapsed_min, width)
 
     print(f"  {'Ep':>3s}  {'box':>7s}  {'cls':>7s}  {'dfl':>7s}  "
@@ -357,8 +361,9 @@ def render(cfg: dict, rows: list[list[str]], n_total: int, title: str,
     bar_w = 30
     filled = min(bar_w, int(pct / 100 * bar_w))
     bar = G.bar_full * filled + G.bar_empty * (bar_w - filled)
-    print(f"  {G.chart} [{bar}] {pct:.0f}% ({ep}/{n_total})", end="")
-    if 1 < ep < n_total:
+    print(f"  {G.chart} 总进度  [{bar}] {pct:.0f}% ({ep}/{n_total})", end="")
+    # 哪怕只跑完 1 轮，累计时间就已经能给出每轮耗时了，不必等到第 2 轮
+    if 1 <= ep < n_total:
         try:
             avg_min = float(rows[ep - 1][1]) / 60.0 / ep
         except (IndexError, ValueError, ZeroDivisionError):
@@ -371,6 +376,18 @@ def render(cfg: dict, rows: list[list[str]], n_total: int, title: str,
             print()
     else:
         print()
+
+    # 当前这轮跑到哪了 —— results.csv 只在整轮结束后才更新，
+    # 轮到内的实时步数只能从训练日志的进度条里取
+    if ep < n_total and run_dir:
+        prog = live_progress(run_dir)
+        if prog and prog["age"] < 300:
+            p2 = prog["step"] / max(prog["n_step"], 1) * 100
+            f2 = min(bar_w, int(p2 / 100 * bar_w))
+            bar2 = G.bar_full * f2 + G.bar_empty * (bar_w - f2)
+            print(f"  {G.wait} 当前轮  [{bar2}] {p2:3.0f}%  "
+                  f"{prog['step']}/{prog['n_step']} 步  {prog['its']:.1f} it/s  "
+                  f"剩余 {prog['eta']}")
     print()
 
 
@@ -453,9 +470,9 @@ def main() -> int:
             except OSError:
                 rows = []
             if rows:
-                render(cfg, rows, n_total, title, elapsed, a.width)
+                render(cfg, rows, n_total, title, elapsed, a.width, run_dir)
             else:
-                render(cfg, [], n_total, title, elapsed, a.width)
+                render(cfg, [], n_total, title, elapsed, a.width, run_dir)
         else:
             render_waiting(cfg, title, run_dir, elapsed, a.width)
 

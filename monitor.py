@@ -181,21 +181,41 @@ _PROGRESS_RE = re.compile(
     r"(\d+)/(\d+)\s+[\d.]+G.*?(\d+)/(\d+)\s+([\d.]+)it/s(?:\s+\S+<(\S+))?")
 
 
+# 训练日志可能不在 runs 目录下（很多人习惯重定向到项目自己的 logs/）。
+# 只搜 run_dir 的父目录会抓到几个月前的老日志，age 远大于 300 秒，
+# 「当前轮实时进度」那行就被过滤掉了 —— 实测 v32 日志在
+# D:\视觉安防系统\logs\train_v32.log，而 D:\fire_runs 下只有 train_v4/v5/v7。
+LOG_EXTRA_DIRS = [
+    r"D:\视觉安防系统\logs",
+    r"D:\training_data\logs",
+]
+
+
 def live_progress(run_dir: str) -> dict | None:
     """从训练日志尾部捞实时进度。
 
     ultralytics 要等每轮验证跑完才写 results.csv，首轮结束前监控只能显示
     「启动中」，干等半小时看不到任何数字。日志里有进度条，可以提前显示。
-    日志通常被重定向到训练目录的同级目录。
+    日志通常被重定向到训练目录的同级目录，也可能在项目自己的 logs/ 下。
 
     返回里的 age 是日志距今多少秒 —— 训练挂掉后日志就不再更新，
     调用方靠它区分「还在跑」和「已经停了」。
     """
     parent = os.path.dirname(os.path.abspath(run_dir).rstrip("\\/"))
-    logs = glob.glob(os.path.join(parent, "*.log"))
+    dirs = [parent, os.getcwd(), *LOG_EXTRA_DIRS]
+    logs = []
+    for d in dict.fromkeys(dirs):            # 去重且保序
+        if os.path.isdir(d):
+            logs.extend(glob.glob(os.path.join(d, "*.log")))
     if not logs:
         return None
-    log = max(logs, key=os.path.getmtime)
+    # 只认「本轮训练开始之后还在写」的日志，避免老日志冒充当前进度
+    try:
+        run_start = os.path.getmtime(run_dir) - 60
+    except OSError:
+        run_start = 0.0
+    fresh = [p for p in logs if os.path.getmtime(p) >= run_start]
+    log = max(fresh or logs, key=os.path.getmtime)
     hits = _PROGRESS_RE.findall(tail_text(log))
     if not hits:
         return None
@@ -385,8 +405,16 @@ def render(cfg: dict, rows: list[list[str]], n_total: int, title: str,
             p2 = prog["step"] / max(prog["n_step"], 1) * 100
             f2 = min(bar_w, int(p2 / 100 * bar_w))
             bar2 = G.bar_full * f2 + G.bar_empty * (bar_w - f2)
+            # 顺手换算成「第几张图」：步数 × batch
+            img = ""
+            try:
+                bsz = int(str(cfg.get("batch", "")).split("-")[0])
+                if bsz > 1:
+                    img = f"  约 {prog['step'] * bsz}/{prog['n_step'] * bsz} 张图"
+            except (TypeError, ValueError):
+                pass
             print(f"  {G.wait} 当前轮  [{bar2}] {p2:3.0f}%  "
-                  f"{prog['step']}/{prog['n_step']} 步  {prog['its']:.1f} it/s  "
+                  f"{prog['step']}/{prog['n_step']} 步{img}  {prog['its']:.1f} it/s  "
                   f"剩余 {prog['eta']}")
     print()
 
